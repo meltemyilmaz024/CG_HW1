@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Computer Graphics Homeworks</title>
+    <script type="text/javascript" src="glMatrix.js"></script>
+    <script type="text/javascript" src="glx.js"></script>
+    <script id="fragmentShader" type="x-shader/x-fragment">
+        #ifdef GL_ES
+        precision highp float;
+        #endif
+        varying vec4 color;
+        void main() {
+            gl_FragColor = color;
+        }
+    </script>
+    <script id="vertexShader" type="x-shader/x-vertex">
+        attribute vec2 vPosition;
+        attribute vec3 vColor;
+
+        varying vec4 color;
+
+        void main() {
+            gl_Position = vec4(vPosition, 0, 1);
+            color = vec4(vColor, 1);
+        }
+    </script>
+    <script>
+    APP=function() {
+        var gl = glx.initGL("canvas", 1),
+            program = glx.initShaders(gl, "vertexShader", "fragmentShader"),
+            NumTimesToSubdivide = 4,
+            vertices = createNgon(0.75, Math.PI/2, 3),
+            points = [],
+            colors = [],
+            pointsBuf = gl.createBuffer(),
+            colorsBuf = gl.createBuffer(),
+            theta = 0 * Math.PI / 180, // radians.
+            twist = false;
+
+        function createNgon (r, a1, n) {
+            var ngon = [],
+                dAngle = Math.PI*2 / n,
+                i, angle;
+            for (i=0; i < n; i++) {
+                angle = a1 + dAngle*i;
+                ngon.push([r*Math.cos(angle), r*Math.sin(angle)]);
+            }
+            return ngon;
+        }
+        function rotNtwist(v) {
+            var x = v[0],
+                y = v[1],
+                d = twist ? Math.sqrt(x*x + y*y) : 1,
+                sintheta = Math.sin(d*theta),
+                costheta = Math.cos(d*theta);
+
+            return [x*costheta-y*sintheta, x*sintheta+y*costheta];
+        }
+        function triangle (a, b, c) {
+            var color = [Math.random(), Math.random(), Math.random()];
+            if (colors.length == points.length) // reinit may preserve colors
+                colors.push (color, color, color);
+            points.push (rotNtwist(a), rotNtwist(b), rotNtwist(c));
+        }
+        function divideTriangle(a, b, c, count) {
+            function avg(vec1, vec2) {
+                return glx.vop(vec1, vec2, function(a,b){return (a+b)/2;});
+            }
+            if ( count > 0 ) {
+                var v0 = avg(a, b),
+                    v1 = avg(a, c),
+                    v2 = avg(b, c);
+                divideTriangle(a, v0, v1, count - 1);
+                divideTriangle(c, v1, v2, count - 1);
+                divideTriangle(b, v2, v0, count - 1);
+                divideTriangle(v0, v1, v2, count - 1);
+            }
+            else { // draw triangle at end of recursion
+                triangle(a, b, c);
+            }
+        }
+        function init() {
+            var vPosition = gl.getAttribLocation(program, "vPosition"),
+                vColor = gl.getAttribLocation(program, "vColor"),
+                array32;
+
+            if (vertices.length == 3) {
+                divideTriangle(vertices[0], vertices[1], vertices[2], NumTimesToSubdivide);
+            } else {
+                for (var i=0; i < vertices.length; i++) {
+                    divideTriangle([0,0], vertices[i], vertices[(i+1)%vertices.length],
+                        NumTimesToSubdivide);
+                };
+            }
+
+            array32 = new Float32Array(glx.flatten(points));
+            gl.bindBuffer(gl.ARRAY_BUFFER, pointsBuf);
+            gl.bufferData(gl.ARRAY_BUFFER, array32, gl.STATIC_DRAW);
+            gl.enableVertexAttribArray(vPosition);
+            gl.vertexAttribPointer(vPosition, points[0].length, gl.FLOAT, false, 0, 0);
+
+            array32 = new Float32Array(glx.flatten(colors));
+            gl.bindBuffer(gl.ARRAY_BUFFER, colorsBuf);
+            gl.bufferData(gl.ARRAY_BUFFER, array32, gl.STATIC_DRAW);
+            gl.enableVertexAttribArray(vColor);
+            gl.vertexAttribPointer(vColor, colors[0].length, gl.FLOAT, false, 0, 0);
+
+            gl.clearColor( 0.0, 0.0, 0.0, 1.0 ); // black background
+        }
+
+        function display() {
+            gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+            gl.drawArrays(gl.TRIANGLES, 0, points.length);
+        }
+
+        function main() {
+            init();
+            glx.animate(display);
+        }
+        
+        // UI:
+        gl.canvas.addEventListener("click", 
+            function(e) { 
+                window.clickEvent = e;
+                console.log( "Click at x:" + (e.clientX-gl.canvas.offsetLeft)
+                      +" y:"+(e.clientY-gl.canvas.offsetTop) 
+                      + " offx:" + e.offsetX +" offy:"+e.offsetY ); 
+            }, false);
+                                
+        function reinit(colorsToo) {
+            // One can also use: points.length = 0 -- perserves existing
+            // references to the arrays
+            points = [];
+            if (colorsToo)
+                colors = [];
+            init();
+        }
+        function setTheta(degrees, id) {
+            theta = degrees * Math.PI / 180;
+            if (id)
+                document.getElementById(id).innerHTML=degrees;
+            reinit(false);
+        }
+        function setSubdivide(subdivisions, id) {
+            if (NumTimesToSubdivide != subdivisions) { // avoid flicker
+                NumTimesToSubdivide = subdivisions;
+                if (id)
+                    document.getElementById(id).innerHTML=NumTimesToSubdivide;
+                reinit(true);
+            }
+        }
+        function setTwist(doTwist) {
+            twist = doTwist;
+            reinit(false);
+        }
+        function setCanvasSize() {
+            glx.resizeCanvas(gl, 1);
+        }
+        function setShape(n) {
+            var initAngle = [Math.PI/2,Math.PI/4,Math.PI/2,0];
+            vertices = createNgon(0.75, initAngle[n-3], n);
+            reinit(true);
+        }
+        function canvasClick(o) {
+            console.log("canvasClick"+o);
+        }
+        return {
+            // dbg
+            dbg: function (){
+                window.gl = gl;
+                window.points = points;
+                window.colors = colors;
+                window.can = gl.canvas;
+                window.vp = gl.getParameter( gl.VIEWPORT );
+                window.div = document.getElementById("left");
+                window.hcan = document.getElementById("canvas");
+            },
+            // interface
+            main: main,
+            setTheta: setTheta,
+            setSubdivide: setSubdivide,
+            setTwist: setTwist,
+            setCanvasSize: setCanvasSize,
+            setShape: setShape,
+            canvasClick: canvasClick
+        };
+    };
+    </script>
+    <style type="text/css">
+        #left {
+            float: left;
+            width: 50%;
+            margin: 0;
+            padding: 0;
+        }
+        #right {
+            float: right;
+            width: 47%;
+            margin: 0;
+            padding: 0 0 0 10px;
+            xpadding-left: 10px;
+            border-left: 1px solid gray;
+        }
+        #bottom {
+            clear: both;
+        }
+        #right h3 {
+            margin-top: 0;
+            padding-top: 0;
+        }
+    </style>
+</head>
+<body onload="APP=APP(); APP.main() //cool stunt to defer eval & conserve globals!"
+      onresize="APP.setCanvasSize()" >   
+
+    <div id="left"">
+        <!-- <canvas id="canvas" width="600" height="600"> -->
+        <canvas  id="canvas" style="width: 100%;"  onclick="APP.canvasClick(this)" >
+            Oops, your browser does not support the canvas element.
+        </canvas>
+    </div>
+    
+    <div id="right">
+        <p> 
+
+        </p>
+        <h2>-- Meltem YILMAZ --</h2>
+        <p> </p>
+        <h3>Computer Graphics - HomeWork2 </h3>
+        <p>Controls: </p>        
+        <form>
+        <table> 
+        <tr> 
+        	<td>Theta:</td> 
+        	<td><input type="range" min="0" max="360" step="5" value="0" 
+                onchange="APP.setTheta(this.value, 'theta')" />
+                <span id="theta">0</span>
+            </td> 
+        </tr> 
+        <tr> 
+        	<td>Subdivide:</td> 
+        	<td><input type="range" min="0" max="6" step="1" value="4" 
+                onchange="APP.setSubdivide(this.value, 'subdivide')" />
+                <span id="subdivide">4</span></td> 
+        </tr> 
+        <tr> 
+        	<td>Twist :</td> 
+        	<td><input type="radio" name="twist" value="yes"
+                    onchange="APP.setTwist(true)" /> yes
+                <input type="radio" name="twist" value="no" checked="checked"
+                    onchange="APP.setTwist(false)" /> no</td> 
+        </tr> 
+        </table>       
+        
+        </form>
+    </div>    
+</body>
+</html>
